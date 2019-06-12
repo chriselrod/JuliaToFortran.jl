@@ -1,0 +1,4 @@
+name = "JuliaToFortran"
+uuid = "d7e44aaa-5da6-11e9-3ae0-99e5d6d45efd"
+authors = ["Chris Elrod <elrodc@gmail.com>"]
+version = "0.1.0"

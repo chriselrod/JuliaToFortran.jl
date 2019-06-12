@@ -89,11 +89,13 @@ const spell_out_greek = Dict{String,String}(
 )
 const greek_regex_match = r"α|Α|β|Β|π|Π|σ|Σ|λ|Λ|γ|Γ|δ|Δ|ϵ|Ε|ζ|Ζ|η|Η|θ|Θ|ι|Ι|κ|Κ|ν|ξ|Ξ|ρ|Ρ|τ|Τ|υ|Υ|ϕ|Φ|χ|Χ|ψ|Ψ|ω|Ω|ℯ|₀|₁|₂|₃|₄|₅|₆|₇|₈|₉|⁰|¹|²|³|⁴|⁵|⁶|⁷|⁸|⁹|ₐ|ₑ|ᵢ|ₖ|ⱼ|ₗ|ₘ|ₙ|ₒ|ₚ|ᵣ|ₕ|ₛ|ₜ|ᵤ|ᵥ|ₓ"
 
-remove_unicode(str) = replace(str, greek_regex_match, m -> spell_out_greek[m])
+function remove_unicode(str)
+    replace(str, greek_regex_match => m -> spell_out_greek[m])
+end
 
 # const doloop_regex = r" enddo\n\s+end"
-for_to_do_loops(str) = replace(replace(str, "for", "do"), r"    enddo\n\s+end", "end do")
-strip_doublebreaks(str) = replace(str, r"\n\s+\n", "\n")
+for_to_do_loops(str) = replace(replace(str, "for" => "do"), r"    enddo\n\s+end" => "end do")
+strip_doublebreaks(str) = replace(str, r"\n\s+\n" => "\n")
 clip_ends(str) = str[8:end-4]
 clean_fortran_string(str) = str |> strip_doublebreaks |> clip_ends |> for_to_do_loops |> remove_unicode
 
@@ -180,6 +182,7 @@ const supported_types = Tuple{DataType,String}[(Float32,"real(4)"), (Float64,"re
 for (t, s) in supported_types
     @eval sized_matrix_type(::Type{<:SVector{N,$t}}) where N = $s * ", dimension($N)"
     @eval sized_matrix_type(::Type{<:SMatrix{M,N,$t}}) where {M,N} = $s * ", dimension($M,$N)"
+    @eval sized_matrix_type(::Type{<:MMatrix{M,N,$t}}) where {M,N} = $s * ", dimension($M,$N)"
     @eval sized_matrix_type(::Type{<:StaticArrays.SArray{Tuple{M,N,O},$t}}) where {M,N,O} = $s * ", dimension($M,$N,$O)"
     @eval sized_matrix_type(::Type{<:StaticArrays.SArray{Tuple{M,N,O,P},$t}}) where {M,N,O,P} = $s * ", dimension($M,$N,$O,$P)"
     @eval sized_matrix_type(::Type{<:StaticArrays.SArray{Tuple{M,N,O,P,Q},$t}}) where {M,N,O,P,Q} = $s * ", dimension($M,$N,$O,$P,$Q)"
@@ -189,9 +192,9 @@ for (t, s) in supported_types
     @eval sized_matrix_type(::Type{<:NTuple{N,$t}}) where N = $s * ", dimension($N)"
     # @eval sized_matrix_type(::Type{<:NTuple{N,$t}}) where N = $s * ", dimension($N)"
 
-    @eval sized_matrix_type(::Type{<:TriangularMatrices.AbstractTriangularMatrix{$t,N,L}}) where {N,L} = $s * ", dimension($L)"
-    @eval sized_matrix_type(::Type{<:TriangularMatrices.AbstractSymmetricMatrix{$t,N,L}}) where {N,L} = $s * ", dimension($L)"
-    @eval sized_matrix_type(::Type{<:TriangularMatrices.MutableRecursiveMatrix{$t,M,N,L}}) where {M,N,L} = $s * ", dimension($L)"
+    # @eval sized_matrix_type(::Type{<:TriangularMatrices.AbstractTriangularMatrix{$t,N,L}}) where {N,L} = $s * ", dimension($L)"
+    # @eval sized_matrix_type(::Type{<:TriangularMatrices.AbstractSymmetricMatrix{$t,N,L}}) where {N,L} = $s * ", dimension($L)"
+    # @eval sized_matrix_type(::Type{<:TriangularMatrices.MutableRecursiveMatrix{$t,M,N,L}}) where {M,N,L} = $s * ", dimension($L)"
 end
 
 #     @eval sized_matrix_type(::Type{<:MutableRecursiveMatrix{$t,M,N,L}}) where {M,N,L} = $s * ", dimension($L)"
@@ -211,12 +214,14 @@ function translate_type(t::DataType)
         out = sized_matrix_type(t)
     elseif t <: StaticArrays.SArray
         out = sized_matrix_type(t)
-    elseif t <: TriangularMatrices.TriangularMatrix
+    elseif t <: StaticArrays.MArray
         out = sized_matrix_type(t)
-    elseif t <: TriangularMatrices.SymmetricMMatrix
-        out = sized_matrix_type(t)
-    elseif t <: TriangularMatrices.MutableRecursiveMatrix
-        out = sized_matrix_type(t)
+    # elseif t <: TriangularMatrices.TriangularMatrix
+    #     out = sized_matrix_type(t)
+    # elseif t <: TriangularMatrices.SymmetricMMatrix
+    #     out = sized_matrix_type(t)
+    # elseif t <: TriangularMatrices.MutableRecursiveMatrix
+    #     out = sized_matrix_type(t)
     else
         throw("Could not match type $t.")
     end
@@ -233,7 +238,7 @@ function symbol_vector_to_string(v::Vector{Symbol})
     out = string(v[1]) * ", "
     for i ∈ 2:length(v)-1
         out *= string(v[i]) * ", "
-        i % 7 == 0 && (out *= "\&\n            ")
+        i % 7 == 0 && (out *= "&\n            ")
     end
     out *= string(v[end])
     out
@@ -271,6 +276,17 @@ function update_work_vars!(work_vars, types, x)
     nothing
 end
 
+function update_work_vars!(work_vars, types, assignee_sym, T_assigned, x)
+    if !haskey(work_vars, T_assigned)
+        types[assignee_sym] = T_assigned
+        work_vars[T_assigned] = Symbol[ assignee_sym ]
+    else
+        type_vec = work_vars[T_assigned]
+        assignee_sym ∉ type_vec && push!(type_vec, assignee_sym)
+    end
+    nothing
+end
+
 const broadcast_ops = (:.+, :.-, :.*, :./)
 const translate_broadcast = Dict{Symbol,Symbol}(
     :.+ => :+,
@@ -287,9 +303,133 @@ function remove_broadcast(x)
     x
 end
 
+function check_stuff(x, types, work_vars, num_blocks)
+    if isa(x, Expr)
+        x.head == :line && return Symbol() # :! We want to skip line annotations
+        if x.head == :call # if the expression is a call, translate it.
+            # @show x
+            if x.args[1] == :*
+
+                # @show x
+
+                if types[x.args[2]] <: AbstractMatrix && types[x.args[3]] <: AbstractMatrix
+                    x.args[1] = :matmul
+                    println("Shouldn't see this atm.")
+                    types[x] = Test.Base.return_types(*, ntuple(i -> types[x.args[i+1]], length(x.args)-1))[1]
+                elseif types[x.args[2]] <: AbstractMatrix && types[x.args[3]] <: AbstractVector
+                    x.args[1] = :matmul
+                elseif types[x.args[3]] <: AbstractMatrix && types[x.args[2]] <: AbstractVector#then second arg isn't
+                    x.args[1] = :matmul
+                elseif types[x.args[3]] <: AbstractVector && types[x.args[2]] <: AbstractVector#then second arg isn't
+                    x.args[1] = :dot_product
+                    types[x] = promote_type(eltype(types[x.args[2]]),eltype(types[x.args[3]]))
+                #Hope this works. If not, gemv, double do loops, or a do loop of dot products?
+                else
+                    # @show x
+                    types[x] = Test.Base.return_types(*, ntuple(i -> types[x.args[i+1]], length(x.args)-1))[1]
+                end
+
+                # @show x
+
+                # x.args[1] == :dot_product && (x.args[2] = deepcopy(x.args[2].args[2]) )
+
+                # @show x
+
+                
+                # @show x
+                    
+            elseif isa(x.args[1], Expr) && x.args[1].args[1] == :SVector
+                popfirst!(x.args)
+                x.head = :vect
+                x.args = deepcopy(x.args[1].args)
+                types[x] = SVector{length(x.args),types[x.args[1]]}
+            elseif isa(x.args[1], Expr) && x.args[1].args[1] == :NTuple
+                popfirst!(x.args)
+                x.head = :vect
+                x.args = deepcopy(x.args[1].args)
+                types[x] = NTuple{length(x.args),types[x.args[1]]}
+            else
+                local return_type::DataType
+                try
+                    return_type = get!(() -> Test.Base.return_types(eval(x.args[1]), ntuple(i -> begin
+                        xarg = x.args[i+1]
+                        (isa(xarg, Symbol) || isa(xarg, Expr)) ? types[xarg] : typeof(xarg)
+                    end, length(x.args)-1))[1], types, x)
+                catch err
+                    @show x
+                    @show types
+                    @show ntuple(i -> x.args[i+1], length(x.args)-1)
+                    rethrow(err)
+                end
+                # @show x, return_type
+                x.args[1], kind = translate(x.args[1], return_type)
+                kind != 0 && push!(x.args, kind)
+                types[x] = return_type
+            end
+
+        elseif x.head == :tuple
+            types[x] = NTuple{length(x.args), types[x.args[1]]}
+        elseif x.head == :for
+            push!(x.args[2].args, :enddo)
+        elseif x.head == :ref
+            types[x] = eltype(types[x.args[1]])
+        elseif x.head == :(:)
+            x.head = :call
+            pushfirst!(x.args, :iterrange)
+            types[x] = Int
+        elseif x.head == Symbol("'") ##We're transposing. Lets not allocate a temporary...
+            # Currently not supported.
+            # x.head = :call
+            # pushfirst!(x.args, :transpose)
+            # types[x] = types[x.args[2]]
+            x.head = deepcopy(x.args[1].head)
+            x.args = deepcopy(x.args[1].args)
+        elseif x.head == Symbol("=") && isa(x.args[1], Symbol)
+            # @show x
+            if x.args[2] isa Number
+                types[x.args[1]] = typeof(x.args[2])
+                update_work_vars!(work_vars, types, x.args[1], typeof(x.args[2]), x)
+            else
+                types[x.args[1]] = types[x.args[2]]
+                update_work_vars!(work_vars, types, x)
+            end
+        elseif x.head == :+=
+            x.head = Symbol("=")
+            x.args[2] = :( $(x.args[1]) + ( $(x.args[2]) ) )
+            types[x.args[2]] = types[x.args[1]]
+            isa(x.args[1], Symbol) && update_work_vars!(work_vars, types, x)
+        elseif x.head == :-=
+            x.head = Symbol("=")
+            x.args[2] = :( $(x.args[1]) - ( $(x.args[2]) ) )
+            types[x.args[2]] = types[x.args[1]]
+            isa(x.args[1], Symbol) && update_work_vars!(work_vars, types, x)
+        elseif x.head == :*=
+            x.head = Symbol("=")
+            x.args[2] = :( $(x.args[1]) * ( $(x.args[2]) ) )
+            types[x.args[2]] = types[x.args[1]]
+            isa(x.args[1], Symbol) && update_work_vars!(work_vars, types, x)
+        elseif x.head == :/=
+            x.head = Symbol("=")
+            x.args[2] = :( $(x.args[1]) / ( $(x.args[2]) ) )
+            types[x.args[2]] = types[x.args[1]]
+            isa(x.args[1], Symbol) && update_work_vars!(work_vars, types, x)
+        elseif x == :π
+            x = Symbol(Float64(π))
+        elseif x == :ℯ
+            x = Symbol(Float64(ℯ))
+        elseif x.head == :macrocall
+            x = x.args[2]
+        elseif x.head == :block
+            num_blocks[] += 1
+        end
+    end        
+    x
+end
+
+
 #define power(X, Y) ((X) ** (Y))
 
-# Core.Inference.return_type
+# Test.Base.return_type
 function translate_expr(expr::Expr, outputs::Dict{DataType,Vector{Symbol}} = Dict{DataType,Vector{Symbol}}(), inputs::Dict{DataType,Vector{Symbol}} = Dict{DataType,Vector{Symbol}}(), size_inputs = Dict{DataType,Vector{Symbol}}(), inout = Dict{DataType,Vector{Symbol}}())
 
 
@@ -303,134 +443,23 @@ function translate_expr(expr::Expr, outputs::Dict{DataType,Vector{Symbol}} = Dic
 
     work_vars = Dict{DataType,Vector{Symbol}}()
 
-    num_blocks = 0
+    num_blocks = Ref(0)
 
-    q = MacroTools.postwalk(x -> begin
-        if isa(x, Expr)
-            x.head == :line && return Symbol() # :! We want to skip line annotations
-            if x.head == :call # if the expression is a call, translate it.
-                # @show x
-                if x.args[1] == :*
-
-                    # @show x
-
-                    if types[x.args[2]] <: AbstractMatrix && types[x.args[3]] <: AbstractMatrix
-                        x.args[1] = :matmul
-                        println("Shouldn't see this atm.")
-                        types[x] = Core.Inference.return_type(*, ntuple(i -> types[x.args[i+1]], length(x.args)-1))
-                    elseif types[x.args[2]] <: AbstractMatrix && types[x.args[3]] <: AbstractVector
-                        x.args[1] = :matmul
-                    elseif types[x.args[3]] <: AbstractMatrix && types[x.args[2]] <: AbstractVector#then second arg isn't
-                        x.args[1] = :matmul
-                    elseif types[x.args[3]] <: AbstractVector && types[x.args[2]] <: AbstractVector#then second arg isn't
-                        x.args[1] = :dot_product
-                        types[x] = promote_type(eltype(types[x.args[2]]),eltype(types[x.args[3]]))
-                    #Hope this works. If not, gemv, double do loops, or a do loop of dot products?
-                    else
-                        # @show x
-                        types[x] = Core.Inference.return_type(*, ntuple(i -> types[x.args[i+1]], length(x.args)-1))
-                    end
-
-                    # @show x
-
-                    # x.args[1] == :dot_product && (x.args[2] = deepcopy(x.args[2].args[2]) )
-
-                    # @show x
-
-                    
-                    # @show x
-                        
-                elseif isa(x.args[1], Expr) && x.args[1].args[1] == :SVector
-                    popfirst!(x.args)
-                    x.head = :vect
-                    x.args = deepcopy(x.args[1].args)
-                    types[x] = SVector{length(x.args),types[x.args[1]]}
-                elseif isa(x.args[1], Expr) && x.args[1].args[1] == :NTuple
-                    popfirst!(x.args)
-                    x.head = :vect
-                    x.args = deepcopy(x.args[1].args)
-                    types[x] = NTuple{length(x.args),types[x.args[1]]}
-                else
-                    local return_type::DataType
-                    try
-                        return_type = get!(() -> Core.Inference.return_type(eval(x.args[1]), ntuple(i -> begin
-                            xarg = x.args[i+1]
-                            (isa(xarg, Symbol) || isa(xarg, Expr)) ? types[xarg] : typeof(xarg)
-                        end, length(x.args)-1)), types, x)
-                    catch err
-                        @show x
-                        @show types
-                        @show ntuple(i -> x.args[i+1], length(x.args)-1)
-                        rethrow(err)
-                    end
-                    # @show x, return_type
-                    x.args[1], kind = translate(x.args[1], return_type)
-                    kind != 0 && push!(x.args, kind)
-                    types[x] = return_type
-                end
-
-            elseif x.head == :tuple
-                types[x] = NTuple{length(x.args), types[x.args[1]]}
-            elseif x.head == :for
-                push!(x.args[2].args, :enddo)
-            elseif x.head == :ref
-                types[x] = eltype(types[x.args[1]])
-            elseif x.head == :(:)
-                x.head = :call
-                unshift!(x.args, :iterrange)
-                types[x] = Int
-            elseif x.head == Symbol("'") ##We're transposing. Lets not allocate a temporary...
-                # Currently not supported.
-                # x.head = :call
-                # unshift!(x.args, :transpose)
-                # types[x] = types[x.args[2]]
-                x.head = deepcopy(x.args[1].head)
-                x.args = deepcopy(x.args[1].args)
-            elseif x.head == Symbol("=") && isa(x.args[1], Symbol)
-                types[x.args[1]] = types[x.args[2]]
-                update_work_vars!(work_vars, types, x)
-            elseif x.head == :+=
-                x.head = Symbol("=")
-                x.args[2] = :( $(x.args[1]) + ( $(x.args[2]) ) )
-                types[x.args[2]] = types[x.args[1]]
-                isa(x.args[1], Symbol) && update_work_vars!(work_vars, types, x)
-            elseif x.head == :-=
-                x.head = Symbol("=")
-                x.args[2] = :( $(x.args[1]) - ( $(x.args[2]) ) )
-                types[x.args[2]] = types[x.args[1]]
-                isa(x.args[1], Symbol) && update_work_vars!(work_vars, types, x)
-            elseif x.head == :*=
-                x.head = Symbol("=")
-                x.args[2] = :( $(x.args[1]) * ( $(x.args[2]) ) )
-                types[x.args[2]] = types[x.args[1]]
-                isa(x.args[1], Symbol) && update_work_vars!(work_vars, types, x)
-            elseif x.head == :/=
-                x.head = Symbol("=")
-                x.args[2] = :( $(x.args[1]) / ( $(x.args[2]) ) )
-                types[x.args[2]] = types[x.args[1]]
-                isa(x.args[1], Symbol) && update_work_vars!(work_vars, types, x)
-            elseif x == :π
-                x = Symbol(Float64(π))
-            elseif x == :ℯ
-                x = Symbol(Float64(ℯ))
-            elseif x.head == :macrocall
-                x = x.args[2]
-            elseif x.head == :block
-                num_blocks += 1
-            end
-        end        
-        x
-    end, expr)
+    q = MacroTools.postwalk(x -> check_stuff(x, types, work_vars, num_blocks), expr)
     q = MacroTools.postwalk(x -> isexpr(x, :ref) ? (x.head = :call; x) : remove_broadcast(x), q)
 
-    if num_blocks > 1
-        squashed = MacroTools.postwalk(x -> isexpr(x,:block) && length(x.args) > 1 ? :($[x.args...]) : x, q)
-        finalq = MacroTools.@q begin end
-        for squashed_block ∈ squashed
-            isa(squashed_block, AbstractArray) ? append!(finalq.args, squashed_block) : push!(finalq.args, squashed_block)
-        end
+    if num_blocks[] > 1
+        # squashed = MacroTools.postwalk(x -> isexpr(x,:block) && length(x.args) > 1 ? :($[x.args...]) : x, q)
+        # squashed = MacroTools.striplines(MacroTools.flatten(q))
+        # display(squashed)
+        # # @show typeof(squashed)
+        # finalq = MacroTools.@q begin end
+        # for squashed_block ∈ squashed
+        #     isa(squashed_block, AbstractArray) ? append!(finalq.args, squashed_block) : push!(finalq.args, squashed_block)
+        # end
+        finalq = MacroTools.striplines(MacroTools.flatten(q))
     else
-        finalq = q
+        finalq = MacroTools.striplines(q)
     end
     FortranCode *= add_fortran_types(work_vars)
 

@@ -1,9 +1,8 @@
 module JuliaToFortran
 
-using   Compat,
-        StaticArrays,
-        TriangularMatrices,
-        MacroTools
+using   StaticArrays,
+        MacroTools,
+        Test
 
 export  translate_expr,
         create_subroutine,
